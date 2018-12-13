@@ -1,0 +1,201 @@
+---
+title: "Logistic regression"
+author: "HGDMC"
+date: "13 December 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Binary classification
+
+In the study of Neural Networks, Deep Learning, Artificial Intelligence, and fancy terms as the like it seems that binary classification is one of the first problems to solve. 
+
+The idea is that we have data on several variables $x_1,x_2,\ldots,x_m$ and a result $y$ that may take values on the set $\{0,1\}$ for each of $n$ observations.
+
+I have been reading on the Deep Learning approach to things, it seems a bit of a brute force approach, which doesn't mean it's wrong or that it doesn't work. Maybe it's just that, being a probabilist, thinking in a logistic regression seems the natural way to go. 
+
+In order to compare these approaches I will develop some ideas below and I will use the following fake data as an example.
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+library(dplyr)
+library(tidyr)
+df <- read.csv(paste0(getwd(),'/data/data.csv'))
+```
+
+```{r, message=FALSE, warning=FALSE}
+# The result y can only take values 0 or 1.
+# The additional information we know are the variables x1 and x2.
+# These variables have no restrictions.
+head(df)
+
+# Here is a summary of the information of each variable.
+summary(df)
+
+# Here is how the three variables are related
+par(pty = 's')
+plot(df$x1,df$x2,col=df$y + 1,pch = 15,
+     xlab = 'x1',ylab = 'x2', main = 'Fake data', asp = 1, xlim = c(0,1), ylim = c(0,1))
+legend(1.05, 0.6, c('y = 0', 'y = 1'),col = c(1,2),pch = 15, xpd = TRUE, bty = 'n')
+```
+
+## Maximum Likelihood
+
+As a probabilist, I am forced to start the modelling with the phrase *Let (name of random variable) be the random variable that...* so here we go:
+
+Let $Y$ be the random variable that denotes whether the result be a $0$ or a $1$ for a random observation. Since $Y$ can only take values on the set $\{0,1\}$ a Bernoulli model sounds like a good idea: $$ Y\sim\mathrm{Bernoulli}(p).$$
+
+Then we can write explicitly the probability that $Y$ takes a specific value:
+$$ \mathbb P[Y = y] = p^y (1-p)^{1-y} \mathbb I_{\{0,1\}} (y).$$
+Where the function $\mathbb I_A\colon\mathbb R\to\{0,1\}$ is the indicator function that takes the value of $0$ if the number where it is evaluated doesn't belong to the set $A$ and $1$ if it does.
+
+Assuming that we have a random sample of size $n$; that is, $n$ independent and identically distributed random variables $Y_1,Y_2,\ldots,Y_n$ from this distribution then we can find the joint probability as
+$$ \begin{align*} \mathbb P[Y_1 = y_1,Y_2= y_2,\ldots,Y_n= y_n] &= \prod_{k = 1}^n \mathbb P[Y_k = y_k]\\
+& = \prod_{k = 1}^n p^{y_k} (1-p)^{1-y_k} \mathbb I_{\{0,1\}} (y_k)\\
+& = \prod_{k = 1}^n p^{y_k} (1-p)^{1-y_k} \\
+& = p^{\sum_{k = 1}^n y_k} (1-p)^{n-\sum_{k = 1}^n y_k}.
+\end{align*}$$
+
+If we see this function as a function of $p$ rather than the values $y_1,\ldots,y_n$ we call this function the Liklihood function. Since we already have a data set with the values $y_1,\ldots,y_n$ it makes sense that we should find $p$ that maximises the probability that we have already observed the data. We call this value of $p$ the  *Maximum Likelihood Estimator* (MLE) and denote it by $\hat p$.
+
+To find it we note that the argument that maximises the Likelihood function is the same as the argument that maximises the logarithm of the Likelihood function. We call this function the score function and denote it by $\ell(p) = \log \mathbb P[Y_1 = y_1,Y_2= y_2,\ldots,Y_n= y_n]$.
+
+Simplifying a bit this expression, we find that
+$$ \begin{align*} \ell(p) & = \log \mathbb P[Y_1 = y_1,Y_2= y_2,\ldots,Y_n= y_n]\\
+& = \log\left( p^{\sum_{k = 1}^n y_k} (1-p)^{n-\sum_{k = 1}^n y_k} \right)\\
+& = \log(p) \sum_{k = 1}^n y_k + \left(n-\sum_{k = 1}^n y_k \right) \log(1-p).
+\end{align*}$$ {#eq:MLE}
+
+In order to find $\hat p$ we now differentiate, 
+$$\begin{align*}
+\frac{d}{dp}\ell(p) & = \frac{d}{dp} \left(\log(p) \sum_{k = 1}^n y_k + \left(n-\sum_{k = 1}^n y_k \right) \log(1-p)\right)\\
+& = \frac{1}{p}\sum_{k=1}^n y_k - \frac{1}{1-p}\left(n - \sum_{k=1}^n y_k\right),
+\end{align*}$$
+
+equate to $0$
+$$ \frac{1}{\hat p}\sum_{k=1}^n y_k - \frac{1}{1-\hat p}\left(n - \sum_{k=1}^n y_k\right) = 0,$$
+
+and solve for $\hat p$:
+
+$$\hat p = \frac{1}{n}\sum_{k=1}^n y_k.$$
+
+This shouldn't come as a surprise, the proportion of $1$'s should be the probability of $Y$ being $1$. In our case, $\hat p = 0.5$. However, it is clear that the variables $x_1$ and $x_2$ provide additional information that may help us refine the parameter $p$ for each specific observation. This is when logistic regression comes into play.
+
+## Logistic Regression
+
+We start the model to start in the same way. $Y$ is still a Bernoulli random variable, but now the parameter $p$ is a function of the additional information, which we call covariates. Then, the sample is no longer identically distributed, but each observation has its own parameters
+$$ Y_k\sim\mathrm{Bernoulli}(p_k).$$
+
+The likelihood can't be longer simplified as the above case, we only get up to here:
+$$ \begin{align*} \mathbb P[Y_1 = y_1,Y_2= y_2,\ldots,Y_n= y_n] &= \prod_{k = 1}^n \mathbb P[Y_k = y_k]\\
+& = \prod_{k = 1}^n p_k^{y_k} (1-p_k)^{1-y_k} \mathbb I_{\{0,1\}} (y_k)\\
+& = \prod_{k = 1}^n p_k^{y_k} (1-p_k)^{1-y_k}.
+\end{align*}$$
+
+Taking logarithms
+$$\begin{align*} \ell(p) & = \log \prod_{k = 1}^n p_k^{y_k} (1-p_k)^{1-y_k}\\
+& =\sum_{k=1}^n \left( y_k \log(p_k) + (1- y_k)\log(1 - p_k) \right).
+\end{align*}$$
+
+Here we then propose a functional form in which $p$ depends on the covariates. Recall that $p$ must be a number in $(0,1)$, so we propose 
+$$ \mathrm{logit} (p_k(x_1,\ldots,x_p)) = \sum_{j=1}^p \beta_j x_j.$$
+To simplify notation, we will write as $\mathbf x = (x_1,\ldots,x_p)\in\mathbb R^p$ all the information known. Hence, our functional form can be written as
+$$ \mathrm{logit} (p_k(\mathbf x)) = \mathbf\beta^T \mathbf x.$$
+For the $k$-th observation we'll write
+$$ \mathrm{logit} (p_k(\mathbf x_k)) = \mathbf\beta^T \mathbf x_k.$$
+
+This leads to the log-likelihood
+$$\begin{align*} \ell(p) & =\sum_{k=1}^n \left( y_k \log(p_k) + (1- y_k)\log(1 - p_k) \right)\\
+& =\sum_{k=1}^n \left( y_k \log\frac{p_k}{1-p_k} + \log(1 - p_k) \right)\\
+& =\sum_{k=1}^n \left( y_k \mathbf \beta^T\mathbf x_k - \log(1 + e^{\mathbf \beta^T\mathbf x_k}) \right).
+\end{align*}$$
+
+Differentiating with respect to a single parameter, let's say $\beta_j$ we find
+$$\begin{align*}
+\frac{d}{d\beta_j}\ell(\beta) &= \frac{d}{d\beta_j} \sum_{k=1}^n \left( y_k \mathbf \beta^T\mathbf x_k - \log(1 + e^{\mathbf \beta^T\mathbf x_k}) \right)\\
+& = \sum_{k=1}^n y_kx_{kj} - \frac{x_{kj}e^{\mathbf \beta^T\mathbf x_k}}{1 + e^{\mathbf \beta^T\mathbf x_k}}\\
+& = \sum_{k=1}^n x_{kj}(y_k - p_k(\mathbf x_k,\beta)).
+\end{align*}$$
+
+Rewriting this in matrix notation, we find that
+$$ \nabla_\beta \ell(\beta) = X^T(\mathbf y - \mathbf p(X,\beta)).$$
+Where $X\in\mathbb R^{n\times m}$ is the matrix of covariates, $\mathbf y\in\mathbb R^n$ is the vector of responses, $\mathbb p\in\mathbb R^n$ is the vector of probabilities for each respondent and recall it is a function of the parameter $\beta\in\mathbb R^m$ we are trying to find.
+
+We now equate to zero, and find a system of $m$ unknowns (the vector $\hat \beta$) in $m$ non-linear equations:
+$$ X^T(\mathbb y - \mathbb p(X,\hat\beta)) = \mathbf 0\in\mathbb R^m.$$
+There is no tractable way to solve this equation, we will have to rely on numerical methods for this. We recall Newton's method:
+
+1. Define $F\colon \mathbb R^{m}\to\mathbb R^m$ by $F(\beta) = X^T(\mathbf y - \mathbf p(X,\beta))$.
+2. Set $\beta^{(0)}\in\mathbb R^m$.
+3. Calculate iteratively $\beta^{(i+1)} = \beta^{(i)} - \nabla F(\beta^{(i)})^{-1}F(\beta^{(i)})$.
+4. The sequence $\{\beta^{(i)}\}_{i\in\mathbb N_0}$ converges quadratically to $\hat\beta$ in a neighbourhood of $\hat\beta$. 
+
+This basically means, that we should repeat step 3 enough times to get a good result. This is itself a challenge since we are dealing with the inverse of a matrix. Our example seems quite inocuous so we will just try to give it the na&iuml;ve mathematician's approach to inverse matrices and see what happens.
+
+```{r, message=FALSE, warning=FALSE}
+# We first set the variables as our equations.
+y <- df$y
+
+# We will add a column of ones to our covariate matrix just to have a constant in our model.
+# Our equations never really prohibited this. The important issue will be that the inverse
+# of the derivative of F exists.
+X <- data.frame(Constant = rep(1,length(y)),
+                x1 = df$x1,
+                x2 = df$x2)
+
+# Since the MLE of p is 0.5, we will start with a beta that does that.
+# This means all 3 betas in 0, this way logit(p)=0 and hence p=0.5 for all observations.
+beta <- rep(0,length=3)
+
+# Define how p depends on X and beta.
+# Note that we will consider X to be fixed and we will be interested in p
+# just as a function of beta.
+p <- function(beta){
+  return(1/(1 + exp(-apply(X * beta,1,sum))))
+}
+
+# We then define the function F
+Fun <- function(beta){
+  res <- (X %>% as.matrix() %>% t()) %*% (y - p(beta))
+  res <- as.numeric(res)
+  return(res)
+}
+```
+
+Before proceding, we should know what the derivative of $F$ looks like. For that, we first find the derivative of $\mathbf p$. Recall that $p_k = \frac{1}{1+e^{\mathbf x_k^T\beta}}$ and as such
+$\mathbf p\colon\mathbb R^m\to\mathbb R^n$ hence the derivative is a matrix 
+$ \nabla\mathbf p\colon\mathbb  R^m\to\mathbb R^{m\times n}$ whose element in row $j$ and column $k$ is given by
+$$\begin{align*} \frac{\partial}{\partial \beta_j}p_k(\beta)
+&= \frac{\partial}{\partial \beta_j}\frac{1}{1+e^{\mathbf x_k^T\beta}}\\
+& = \frac{x_{kj}e^{\mathbf x_k^T\beta}}{(1+e^{\mathbf x_k^T\beta})^2}\\
+& = x_{kj}p_k(\beta)(1-p_k(\beta)).
+\end{align*}$$
+
+Which we may see that in matrix notation may be rewritten as
+$$ \nabla \mathbf p = X^T W,$$
+with the $W\in\mathbb R^{n\times n}$ a diagonal matrix defined as
+$$W_{k,k} = p_k(1-p_k).$$
+
+We now find the derivative of $F$ using the chain rule
+$$\begin{align*}
+\nabla F(\beta) &= \nabla X^T(\mathbf y - \mathbf p)\\
+& = -(\nabla \mathbf p(\beta))X\\
+& = - X^T W X.
+\end{align*}$$
+
+Ok, back to R:
+
+```{r, message=FALSE, warning=FALSE}
+# We now calculate the derivative of F
+DFun <- function(beta){
+  res <- - t(as.matrix(X)) %*% diag(p(beta)) %*% as.matrix(X)
+  return(res)
+}
+
+# We write a function to do Newton's method
+# following the previously described pseudo-code
+
+```
+
