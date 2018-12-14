@@ -36,9 +36,10 @@ summary(df)
 
 # Here is how the three variables are related
 par(pty = 's')
-plot(df$x1,df$x2,col=df$y + 1,pch = 15,
-     xlab = 'x1',ylab = 'x2', main = 'Fake data', asp = 1, xlim = c(0,1), ylim = c(0,1))
-legend(1.05, 0.6, c('y = 0', 'y = 1'),col = c(1,2),pch = 15, xpd = TRUE, bty = 'n')
+plot(df$x1,df$x2,col = unlist(lapply(df$y,function(x){ return(if_else(x==1,'black','blue'))})),
+       pch = 15,
+       xlab = 'x1',ylab = 'x2', main = 'Fake data', asp = 1, xlim = c(0,1), ylim = c(0,1))
+legend(1.05, 0.6, c('y = 0', 'y = 1'),col = c('blue','black'),pch = 15, xpd = TRUE, bty = 'n')
 ```
 
 ## Maximum Likelihood
@@ -83,7 +84,7 @@ $$\hat p = \frac{1}{n}\sum_{k=1}^n y_k.$$
 
 This shouldn't come as a surprise, the proportion of $1$'s should be the probability of $Y$ being $1$. In our case, $\hat p = 0.5$. However, it is clear that the variables $x_1$ and $x_2$ provide additional information that may help us refine the parameter $p$ for each specific observation. This is when logistic regression comes into play.
 
-## Logistic Regression
+## Logistic Regression by hand
 
 We start the model to start in the same way. $Y$ is still a Bernoulli random variable, but now the parameter $p$ is a function of the additional information, which we call covariates. Then, the sample is no longer identically distributed, but each observation has its own parameters
 $$ Y_k\sim\mathrm{Bernoulli}(p_k).$$
@@ -153,7 +154,7 @@ beta <- rep(0,length=3)
 # Note that we will consider X to be fixed and we will be interested in p
 # just as a function of beta.
 p <- function(beta){
-  return(1/(1 + exp(-apply(X * beta,1,sum))))
+  return(1/(1 + exp(-colSums(apply(X,1,function(k){return(k*beta)})))))
 }
 
 # We then define the function F
@@ -190,12 +191,179 @@ Ok, back to R:
 ```{r, message=FALSE, warning=FALSE}
 # We now calculate the derivative of F
 DFun <- function(beta){
-  res <- - t(as.matrix(X)) %*% diag(p(beta)) %*% as.matrix(X)
+  res <- - t(as.matrix(X)) %*% diag(p(beta)*(1-p(beta))) %*% as.matrix(X)
   return(res)
 }
 
 # We write a function to do Newton's method
-# following the previously described pseudo-code
-
+# following the previously described pseudo-code.
+Newton <- function(beta0, maxiter = 1000, eps = 1e-10){
+  # Initialise the results
+  current_beta <- beta0
+  convergence <- 0
+  iter <- 0
+  norms <- sqrt(sum(Fun(current_beta) * Fun(current_beta)))
+  
+  # Start loop to convergence
+  while(convergence == 0 & iter < maxiter & norms[length(norms)] > eps){
+    # Check if the derivative of F is singular
+    if(abs(det(DFun(current_beta))) <= eps){
+      # Return current beta with no convergence
+      res <- list(beta = current_beta,
+                  convergence = 0,
+                  iter = iter + 1,
+                  norms = norms)
+      # Claim it has converged to get out of loop
+      convergence <- 1
+    }else{
+      # We have a non-singular matrix, so we proceed
+      # Update beta
+      current_beta <- current_beta - solve(DFun(current_beta)) %*% Fun(current_beta)
+      # Update norm vector, this is for the history of convergence
+      # Recall we should find a quadratic convergence
+      norms <- c(norms,sqrt(sum(Fun(current_beta) * Fun(current_beta))))
+      # Update number of iterations
+      iter <- iter + 1
+      # Check if we have converged
+      if(sqrt(sum(Fun(current_beta) * Fun(current_beta))) <= eps){
+        # Update convergence
+        convergence <- 1
+        # This is what we want to find
+        res <- list(beta = current_beta,
+                    convergence = 1,
+                    iter = iter,
+                    norms = norms)
+      }
+    }
+  }
+  # Check if we ran out of iterations
+  if(iter >= maxiter){
+    # Return that we have with no convergence
+    res <- list(beta = current_beta,
+                convergence = 0,
+                iter = iter,
+                norms = norms)
+  }
+  # Only one return!
+  return(res)
+}
 ```
 
+It is now the moment of truth. We run this function, and we will have find our logistic regression.
+```{r, message=FALSE, warning=FALSE}
+# Finding the MLE of the logistic regression coefficients
+beta_hat <- Newton(beta)
+
+# Checking that the algorithm converged
+beta_hat$convergence
+
+# Checking that the derivative of the log-likelihood is indeed 0. That is F(beta_hat)=0.
+Fun(beta_hat$beta)
+
+# Looking how the method converges. It took only 10 iterations.
+plot(beta_hat$norms, pch = 15,xlab = 'Iteration', ylab = 'Norm of F(beta)',
+     main="Convergence of Newton's method")
+```
+
+## Logistic Regression with R
+
+Fortunately for everybody, no one needs to know all of the above and we may find all of the above in a few lines of R:
+
+```{r, message=FALSE, warning=FALSE}
+# Logistic regression
+log_reg <- glm(y ~ x1 + x2,family = 'binomial', data = df)
+```
+
+That's right! We can summarise all the previous section in just one line of code. We will notice that actually find the same coefficients, the same values of $\beta$.
+
+```{r, message=FALSE, warning=FALSE}
+data.frame( our_coefficients = beta_hat$beta,
+            R_function = log_reg$coefficients)
+```
+
+Now we have a set of probabilities for each observation. Note that our high probabilities have mostly associated values of $y=1$ while our low probabilities a value of $y=0$.
+
+```{r, message=FALSE, warning=FALSE}
+# First, note that I'll keep the R results from here on, but we estimated exactly the same thing.
+plot(log_reg$fitted.values,p(beta_hat$beta), pch = 15,
+     xlab = 'R estimated probabilities',
+     ylab = 'Our estimated probabilities',
+     main = "Comparison of our method and R's")
+
+# Second, we now add to our data frame, it's estimated probabilities
+df$probabilities <- log_reg$fitted.values
+
+# Third compare them to the actual values of y.
+boxplot(probabilities~y,data=df, xlab = 'Values of y',
+        ylab = 'Estimated probability')
+```
+
+Here we see that regardless of the cut-off point we decide to round a probability to decide whether the corresponding value of $y$ should be either $0$ or $1$, we will have some errors. Not many, but some.
+
+In fact, we can see how our probability function looks like on the whole plane:
+```{r, message=FALSE, warning=FALSE}
+grid <- expand.grid(list(x1 = seq(0,1,length = 100), x2 = seq(0,1,length = 100)))
+surface <-  1/(1+exp(-predict(log_reg,newdata = grid)))
+
+image(seq(0,1,length = 100),seq(0,1,length = 100),matrix(surface,ncol = 100),
+      col = rev(heat.colors(15)),
+      xlab = 'x1',ylab = 'x2', main = 'Logistic regression', asp = 1,
+      xlim = c(0,1), ylim = c(0,1))
+points(df$x1,df$x2,col = unlist(lapply(df$y,function(x){ return(if_else(x==1,'black','blue'))})),
+       pch = 15)
+legend(1.05, 0.6, c('y = 0', 'y = 1'),col = c('blue','black'),pch = 15, xpd = TRUE, bty = 'n')
+```
+
+The redder the region, the higher the probability that $y=1$; the yellower, the lower. There's a clear space where the gradient starts falling. We may even see the exact values in which the decision is fuzzy. Whatever we do, that's the region where we will fail, uncertainty is too big to go for one team or the other.
+```{r, message=FALSE, warning=FALSE}
+image(seq(0,1,length = 100),seq(0,1,length = 100),matrix(surface,ncol = 100),
+      col = rev(heat.colors(15)),
+      xlab = 'x1',ylab = 'x2', main = 'Logistic regression', asp = 1,
+      xlim = c(0,1), ylim = c(0,1))
+points(df$x1,df$x2,col = unlist(lapply(df$y,function(x){ return(if_else(x==1,'black','blue'))})),
+       pch = 15)
+legend(1.05, 0.6, c('y = 0', 'y = 1'),col = c('blue','black'),pch = 15, xpd = TRUE, bty = 'n')
+contour(x = seq(0,1,length = 100),
+        y = seq(0,1,length = 100),
+        z = matrix(surface,ncol = 100),
+        levels = c(0.1,0.5,0.9), 
+        add = TRUE)
+```
+
+Since the final objective is to take a decision on whether $0$ or $1$. We go for the $0.5$ cut-off. We decide $y=1$ if $p>=0.5$ and $y=0$ if $p<0.5$.
+```{r, message=FALSE, warning=FALSE}
+# We now add the decision made by the logistic regression
+df$fitted <- df$probabilities %>% 
+  lapply(function(p){ return(if_else(p>=0.5,1,0)) }) %>% 
+  unlist()
+
+# Compare the actual value against the fitted one
+xtabs(~y +fitted,data = df)
+```
+
+We classify correctly 93% of the data. This is a very good logistic regression.
+We may even change the cut-off point by checking how well we are classifying:
+
+```{r, message=FALSE, warning=FALSE}
+# This table gathers the percentage of correct decisions given a ceratin cut-off value
+Calif <- data.frame(cut_off = seq(0.01,0.99,0.001))
+Calif <- lapply(1:length(Calif$cut_off),function(k){
+  aux <- df$probabilities %>%
+    lapply(function(p){ return(if_else(p>=Calif$cut_off[k],1,0)) }) %>% unlist()
+  cont_tab <- xtabs(~df$y + aux)
+  Correct <- cont_tab[1,1] + cont_tab[2,2]
+  Jac <- cont_tab[2,2]/(cont_tab[2,2] + cont_tab[1,2] + cont_tab[2,1])
+  res <- data.frame(Correct = Correct,
+                    Jaccard = Jac)
+  return(res)
+}) %>% do.call(rbind,.) %>% cbind(Calif,.)
+
+# These are the probability cut-offs that reach the maximum correct percentage.
+Calif$cut_off[which(Calif$Correct == max(Calif$Correct))]
+
+# Since we win 1 extra correct classification, we'll change the cut-off to 0.6
+# but right now we don't have a good argument to do so.
+df$fitted <- df$probabilities %>% 
+  lapply(function(p){ return(if_else(p>=0.6,1,0)) }) %>% 
+  unlist()
+```

@@ -16,24 +16,36 @@ df[c(which(df$x1 == min(df$x1)),which(df$x1 == max(df$x1))),]
 # Logistic regression
 log_reg <- glm(y ~ x1 + x2,family = 'binomial', data = df)
 summary(log_reg)
-df$fitted <- log_reg$fitted.values
-boxplot(fitted~y,data=df)
+df$probabilities <- log_reg$fitted.values
+boxplot(probabilities~y,data=df)
 
 grid <- expand.grid(list(x1 = seq(0,1,length = 100), x2 = seq(0,1,length = 100)))
 surface <-  1/(1+exp(-predict(log_reg,newdata = grid)))
 
 image(seq(0,1,length = 100),seq(0,1,length = 100),matrix(surface,ncol = 100),
+      col = rev(heat.colors(15)),
       xlab = 'x1',ylab = 'x2', main = 'Logistic regression', asp = 1, xlim = c(0,1), ylim = c(0,1))
-points(df$x1,df$x2,col = df$y + 1, pch = 15)
+points(df$x1,df$x2,col = unlist(lapply(df$y,function(x){ return(if_else(x==1,'black','blue'))})),
+       pch = 15)
+legend(1.05, 0.6, c('y = 0', 'y = 1'),col = c('blue','black'),pch = 15, xpd = TRUE, bty = 'n')
+
 contour(x = seq(0,1,length = 100),
         y = seq(0,1,length = 100),
         z = matrix(surface,ncol = 100),
-        levels = 0.5, 
+        levels = c(0.1,0.5,0.9), 
         add = TRUE)
 slope <- -log_reg$coefficients[2]/log_reg$coefficients[3]
 
+df[df$probabilities <= 0.9 & df$probabilities >= 0.1,] %>% dim()
+plot(df$x1[df$probabilities <= 0.9 & df$probabilities >= 0.1], pch =15,
+     df$x2[df$probabilities <= 0.9 & df$probabilities >= 0.1],
+     col = 1+df$y[df$probabilities <= 0.9 & df$probabilities >= 0.1])
+
 
 # Logistic regression by hand
+
+data.frame( our_coefficients = beta_hat$beta,
+            R_function = log_reg$coefficients)
 
 # We first set the variables as our equations.
 y <- df$y
@@ -53,7 +65,7 @@ beta <- rep(0,length=3)
 # Note that we will consider X to be fixed and we will be interested in p
 # just as a function of beta.
 p <- function(beta){
-  return(1/(1 + exp(-apply(X * beta,1,sum))))
+  return(1/(1 + exp(-colSums(apply(X,1,function(k){return(k*beta)})))))
 }
 
 # We then define the function F
@@ -65,7 +77,7 @@ Fun <- function(beta){
 
 
 DFun <- function(beta){
-  res <- - t(as.matrix(X)) %*% diag(p(beta)) %*% as.matrix(X)
+  res <- - t(as.matrix(X)) %*% diag(p(beta)*(1-p(beta))) %*% as.matrix(X)
   return(res)
 }
 
@@ -73,61 +85,122 @@ DFun <- function(beta){
 
 # We write a function to do Newton's method
 # following the previously described pseudo-code
-Newton <- function(beta0, maxiter = 1000, eps = 1e-8){
+Newton <- function(beta0, maxiter = 1000, eps = 1e-50){
+  # Initialise the results
   current_beta <- beta0
   convergence <- 0
   iter <- 0
-  norms <- list(sum(Fun(current_beta) * Fun(current_beta)))
-  if(sum(Fun(current_beta) * Fun(current_beta)) <= eps){
-    res <- list(current_beta,
-                convergence = 1,
-                iter = 0,
-                norms = unlist(norms))
-    convergence <- 1
-  }
-  while(convergence == 0 & iter < maxiter){
+  norms <- sqrt(sum(Fun(current_beta) * Fun(current_beta)))
+  
+  # Start loop to convergence
+  while(convergence == 0 & iter < maxiter & norms[length(norms)] > eps){
+    # Check if the derivative of F is singular
     if(abs(det(DFun(current_beta))) <= eps){
-      norms[[iter + 1]] <- sum(Fun(current_beta) * Fun(current_beta))
+      # Return current beta with no convergence
       res <- list(beta = current_beta,
                   convergence = 0,
                   iter = iter + 1,
-                  norms = unlist(norms))
+                  norms = norms)
+      # Claim it has converged to get out of loop
       convergence <- 1
     }else{
+      # We have a non-singular matrix, so we proceed
+      # Update beta
       current_beta <- current_beta - solve(DFun(current_beta)) %*% Fun(current_beta)
-      norms[[iter + 1]] <- sum(Fun(current_beta) * Fun(current_beta))
+      # Update norm vector, this is for the history of convergence
+      # Recall we should find a quadratic convergence
+      norms <- c(norms,sqrt(sum(Fun(current_beta) * Fun(current_beta))))
+      # Update number of iterations
       iter <- iter + 1
-      if(sum(Fun(current_beta) * Fun(current_beta)) <= eps){
+      # Check if we have converged
+      if(sqrt(sum(Fun(current_beta) * Fun(current_beta))) <= eps){
+        # Update convergence
+        convergence <- 1
+        # This is what we want to find
         res <- list(beta = current_beta,
                     convergence = 1,
                     iter = iter,
-                    norms = unlist(norms))
-        convergence <- 1
+                    norms = norms)
       }
     }
   }
+  # Check if we ran out of iterations
   if(iter >= maxiter){
-    norms[[maxiter]] <- sum(Fun(current_beta) * Fun(current_beta))
+    # Return what we have with no convergence
     res <- list(beta = current_beta,
                 convergence = 0,
-                iter = maxiter,
-                norms = unlist(norm))
+                iter = iter,
+                norms = norms)
   }
+  # Only one return!
   return(res)
 }
 
 
-Newton2 <- function(beta,maxiter = 1000,eps = 1e-5){
-  norms <- list()
-  for(k in 1:maxiter){
-    beta <- beta - solve(DFun(beta)) %*% Fun(current_beta)
-    norms[[k+1]] <- sum(Fun(beta) * Fun(beta))
-  }
-  return(list(beta = beta, norms = unlist(norms)))
-}
+beta_hat <- Newton(beta, maxiter = 1000, eps = 1e-10)
+beta_hat <- Newton(beta)
+Fun(beta_hat$beta)
+det(DFun(beta_hat$beta))
+plot(beta_hat$norms)
 
-beta_hat <- Newton(beta, maxiter = 100)
-beta_hat <- Newton2(beta, maxiter = 4)
+
+beta0 <- c(0,0,0)
+
+
+beta0 <- beta0 - solve(DFun(beta0)) %*% Fun(beta0)
+beta0
+Fun(beta0)
+
+beta_hat <- Newton2(beta, maxiter = 3)
+plot(beta_hat$norms,type='l')
+beta_hat$beta
+Fun(beta_hat$beta)
+Fun(log_reg$coefficients)
+sqrt(sum(Fun(beta)))
+
+
+
+plot(df$fitted,p(log_reg$coefficients))
+plot(df$fitted,p(c(0,0,0)))
+Fun(beta)
+Fun(log_reg$coefficients)
+det(DFun(beta))
+det(DFun(log_reg$coefficients))
+
+
+plot(df$fitted,col = df$y + 1)
+points(p(log_reg$coefficients),type='l')
+
+df[abs(p(log_reg$coefficients) - df$fitted)>0.01,] %>% dim()
+
+
+plot(1/(1+exp(-apply(cbind(1,df[,1],df[,2]) * log_reg$coefficients,1,sum))),
+     1/(1+exp(-apply(X * log_reg$coefficients,1,sum))))
+
+plot(1/(1+exp(-apply(cbind(1,df[,1],df[,2]) * log_reg$coefficients,1,sum))),
+     df$fitted)
+
+
+plot(log_reg$coefficients[1] + X[,2]*log_reg$coefficients[2] + X[,3]*log_reg$coefficients[3],
+     log_reg$linear.predictors)
+
+plot(1/(1 + exp(-(X[,1]*log_reg$coefficients[1] + X[,2]*log_reg$coefficients[2] + X[,3]*log_reg$coefficients[3]))),
+     log_reg$fitted.values)
+
+plot(1/(1 + exp(-colSums(apply(X,1,function(k){return(k*log_reg$coefficients)})))),
+1/(1 + exp(-(X[,1]*log_reg$coefficients[1] + X[,2]*log_reg$coefficients[2] + X[,3]*log_reg$coefficients[3]))))
+
+plot(1/(1 + exp(-colSums(apply(X,1,function(k){return(k*log_reg$coefficients)})))),
+     df$fitted)
+
+
+cor(log_reg$coefficients[1] + X[,2]*log_reg$coefficients[2] + X[,3]*log_reg$coefficients[3],
+     log_reg$linear.predictors)
+
+plot(log_reg$coefficients[1] + X[,2]*log_reg$coefficients[2] + X[,3]*log_reg$coefficients[3],
+     ylim = c(-15,15))
+lines(log_reg$linear.predictors)
+
 
 dim(X)
 dim(Dp(beta))
@@ -144,15 +217,42 @@ X %>% as.matrix() %>% dim()
 - dp %*% as.matrix(X)
 
 beta0 <- log_reg$coefficients
-
+beta0 <- beta
 
 beta0 <- beta0 - solve(DFun(beta0)) %*% Fun(beta0)
 norms <- sum(Fun(beta0) * Fun(beta0))
 beta0
 norms
-?fsolve
-
-log_reg$coefficients
 
 
-aux <- pracma::fsolve(Fun,beta,DF)
+df$fitted <- df$probabilities %>% 
+  lapply(function(p){ return(if_else(p>=0.6,1,0)) }) %>% 
+  unlist()
+
+?xtabs
+xtabs(y~fitted,data = df)
+xtabs(~y +fitted,data = df)
+
+
+sqrt(mean((df$y-df$fitted)^2))
+sqrt(99/100*var(df$y-df$fitted))
+
+Calif <- data.frame(cut_off = seq(0.01,0.99,0.001))
+Calif <- lapply(1:length(Calif$cut_off),function(k){
+  aux <- df$probabilities %>%
+    lapply(function(p){ return(if_else(p>=Calif$cut_off[k],1,0)) }) %>% unlist()
+  cont_tab <- xtabs(~df$y + aux)
+  Correct <- cont_tab[1,1] + cont_tab[2,2]
+  Jac <- cont_tab[2,2]/(cont_tab[2,2] + cont_tab[1,2] + cont_tab[2,1])
+  res <- data.frame(Correct = Correct,
+                    Jaccard = Jac)
+  return(res)
+}) %>% do.call(rbind,.) %>% cbind(Calif,.)
+head(Calif)
+
+Calif$cut_off[which(Calif$Correct == max(Calif$Correct))]
+
+
+
+plot(Calif$cut_off,Calif$Correct/100,type='l')
+lines(Calif$cut_off,Calif$Jaccard,col='red')
