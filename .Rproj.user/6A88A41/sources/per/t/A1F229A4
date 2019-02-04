@@ -1,0 +1,23 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1548938378655.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "3220779688",
+    "id" : "A1F229A4",
+    "lastKnownWriteTime" : 1549014982,
+    "last_content_update" : 1549014982117,
+    "path" : "~/Git stuff/Logistic/bayes_log_reg.stan",
+    "project_path" : "bayes_log_reg.stan",
+    "properties" : {
+        "cursorPosition" : "27,0",
+        "scrollLine" : "3",
+        "tempName" : "Untitled1"
+    },
+    "relative_order" : 2,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "stan"
+}

@@ -1,0 +1,22 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1548938427968.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "175353585",
+    "id" : "EA8E75B0",
+    "lastKnownWriteTime" : 1548934952,
+    "last_content_update" : 1548934952,
+    "path" : "C:/Users/gonzalezh/OneDrive - Kantar/stuff/R codes/Bayesian/8schools.stan",
+    "project_path" : null,
+    "properties" : {
+        "cursorPosition" : "0,0",
+        "scrollLine" : "0"
+    },
+    "relative_order" : 4,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "stan"
+}

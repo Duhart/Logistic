@@ -1,7 +1,7 @@
 ---
-title: "Logistic regression"
-author: "HGDMC"
-date: "13 December 2018"
+title: "Logistic regression: THe Path Towards Newural Networks"
+author: "Dr. Horacio González Duhart"
+date: "1 February 2019"
 output: html_document
 ---
 
@@ -26,6 +26,8 @@ In order to tackle the problem I will develop some ideas below and I will use th
 ```{r, message=FALSE, warning=FALSE, echo=FALSE}
 library(dplyr)
 library(tidyr)
+library(rstan)
+library(ggplot2)
 df <- read.csv(paste0(getwd(),'/data/data.csv'))
 ```
 
@@ -392,7 +394,7 @@ df$fitted <- df$probabilities %>%
 
 ## Loss function
 
-This is how a logistic regression is done. The main issue was to minimise the loss function $\ell$, another way to put it is to maximise the log-likelihood $$ -\ell(\beta) = \sum_{k = 1}^n (y_k\log(p_k) + (1-y_k)\log(1-p_k)).$$
+This is how a logistic regression is done. The main issue was to minimise the loss function $\ell$, another way to put it is to maximise the log-likelihood $$ -\ell(\beta) = \log L(\beta) = \sum_{k = 1}^n (y_k\log(p_k) + (1-y_k)\log(1-p_k)).$$
 In the AI argot, we refer to the loss function rather than the likelihood or log-likelihood, and it will be something we would like to minimise rather than maximise. So from here onwards, I'll only talk about the loss function rather than the log-likelihood.
 
 ## A Bayesian approach
@@ -409,5 +411,123 @@ This is Bayes's Theorem. THe numerator is the product of the likelihood times th
 
 $$ f_{\beta|Y}(\beta) \propto L(\beta) f_{\beta}(\beta).$$
 
-The goal is to say something about the posterior of $\beta$, a function that we know up to a multiplicative constant. I don't want to go into the details here, but that's precisely what 
+The goal is to say something about the posterior of $\beta$, a function that we know up to a multiplicative constant. I don't want to go into the details here, but that's precisely what Gibbs sampling is all about. This is implemented in R via the [*rstan package*](https://github.com/stan-dev/rstan/wiki/RStan-Getting-Started).
+
+We first save the following file:
+
+```{r eval=FALSE}
+// Bayesian logistic regresion
+// file saved as bayes_log_reg.stan
+data {
+  int<lower=0> N;             // number of data points 
+  int<lower=0,upper=1> y[N];  // value 0 or 1
+  vector[N] x1;                 // First covariate
+  vector[N] x2;                 // Second covariate
+  real b0_init;
+  real b1_init;
+  real b2_init;
+  real<lower=0> sig;
+}
+parameters {
+  real b0;                    // intercept
+  real b1;                    // slope of x1
+  real b2;                    // slope of x2
+}
+transformed parameters {
+  vector[N] p = 1 ./ (1 + exp(-b0 - x1 * b1 - x2 * b2)); // probabilities
+}
+model {
+  b0 ~ normal(b0_init,sig);
+  b1 ~ normal(b1_init,sig);
+  b2 ~ normal(b2_init,sig);
+  for(k in 1:N)
+      y[k] ~ bernoulli(p[k]);
+}
+
+```
+
+Then run the model like this:
+
+
+```{r, message=FALSE, warning=FALSE, results="hide"}
+# We prepare the data for STAN
+logistic_dat <- list(N = 100,
+                     y = df$y, x1 = df$x1, x2 = df$x2,
+                     b0_init = log_reg$coefficients[1],
+                     b1_init = log_reg$coefficients[2],
+                     b2_init = log_reg$coefficients[3],
+                     sig = 20)
+# Run model
+MCMC_log_reg <- stan(file = 'bayes_log_reg.stan', data = logistic_dat)
+```
+
+The first thing that makes it different with respect to the previous approach is that we don't have a point estimator for our parameter, but rather a posterior density.
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, fig.height=4, fig.width=8, echo=FALSE}
+traces <- stan_trace(MCMC_log_reg, pars = c('b0','b1','b2'))
+par(mfrow = c(1,3))
+
+dens <- density(traces$data$value[traces$data$parameter == 'b0'])
+plot(dens$x,dens$y,col='white', xlab = 'Constant',ylab = 'Density')
+polygon(c(dens$x,rev(dens$x)),c(rep(0,length(dens$x)),rev(dens$y)),
+        col = rgb(1,0,0,0.3))
+
+dens <- density(traces$data$value[traces$data$parameter == 'b1'])
+plot(dens$x,dens$y,col='white', xlab = 'x1',ylab = 'Density',
+     main = 'Bayesian Logistic Regression')
+polygon(c(dens$x,rev(dens$x)),c(rep(0,length(dens$x)),rev(dens$y)),
+        col = rgb(0,1,0,0.3))
+
+dens <- density(traces$data$value[traces$data$parameter == 'b2'])
+plot(dens$x,dens$y,col='white', xlab = 'x2',ylab = 'Density')
+polygon(c(dens$x,rev(dens$x)),c(rep(0,length(dens$x)),rev(dens$y)),
+        col = rgb(0,0,1,0.3))
+
+```
+
+Taking the mean of these densities, we then may compare with our previous results:
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+bayes_coeff <- c(mean(traces$data$value[traces$data$parameter == 'b0']),
+                 mean(traces$data$value[traces$data$parameter == 'b1']),
+                 mean(traces$data$value[traces$data$parameter == 'b2']))
+data.frame( our_coefficients = beta_hat$beta,
+            R_function = log_reg$coefficients,
+            Bayesian_regression = bayes_coeff)
+```
+
+Yes, they differ a bit. The question is whether that difference is a huge one, or it isn't.
+
+```{r, message=FALSE, warning=FALSE}
+surface <-  1/(1+exp(-bayes_coeff[1] - bayes_coeff[2] * grid$x1 - bayes_coeff[3] * grid$x2))
+
+image(seq(0,1,length = 100),seq(0,1,length = 100),matrix(surface,ncol = 100),
+      col = rev(heat.colors(15)),
+      xlab = 'x1',ylab = 'x2', main = 'Bayesian Logistic regression', asp = 1,
+      xlim = c(0,1), ylim = c(0,1))
+
+points(df$x1,df$x2,col = unlist(lapply(df$y,function(x){
+  return(if_else(x==1,'black','blue'))})),
+  pch = 15)
+
+legend(1.05, 0.6, c('y = 0', 'y = 1'),col = c('blue','black'),pch = 15,
+       xpd = TRUE, bty = 'n')
+
+contour(x = seq(0,1,length = 100),
+        y = seq(0,1,length = 100),
+        z = matrix(surface,ncol = 100),
+        levels = c(0.1,0.5,0.9), 
+        add = TRUE)
+```
+
+
+It seems we are still on the right track, and even better we have found a whole distribution that represents our knowledge of the parameters we are trying to find. 
+
+## Neural Networks
+
+Now that we've gone through all this analysis of the logistic regression, what does it have to do with Neural Networks? It so happens to be the simplest one.
+
+We have an input $x$ that we want to send to a Neural Network that gives me an output $\hat y$ that is as similar as a target variable $y$.
+
+In our logistic regression, this looks like this:
 

@@ -1,6 +1,12 @@
 # Libraries
 library(dplyr)
+library(rstan)
+library(mvtnorm)
 
+# Configure rstan
+#options(mc.cores = parallel::detectCores())
+#rstan_options(auto_write = TRUE)
+#Sys.setenv(LOCAL_CPPFLAGS = '-march=native')
 
 # Data
 df <- read.csv(paste0(getwd(),'/data/data.csv'))
@@ -268,7 +274,167 @@ yhat <- function(b){
 
 ell <- function(b){
   res <- sum(df$y*log(yhat(b)) + (1 - df$y)*log(1-yhat(b)))
-  return(y)
+  return(res)
 }
 
-b0 <- seq()
+Lik <- function(b){
+  return(exp(ell(b)))
+}
+
+ker <- 
+
+yhat(b)
+yhat(blr$coefficients)
+
+ell(b)
+ell(blr$coefficients)
+
+Lik(b)
+Lik(blr$coefficients)
+
+##### MCMC
+
+# Step 1. Inintialise b0
+b <- blr$coefficients
+b_path <- b
+prior <- function(b){
+  return(dmvnorm(b,rep(0,3),diag(rep(50,3))))
+}
+
+# Here comes the cycle
+burn <- 5000
+sample_size <- 1000
+for(k in 1:(burn + sample_size)){
+  # Step 2. Sample a new value b_new from distribution q(b)
+  b_prop <- rmnorm(n = 1, mean = b, varcov = diag(rep(2,3)))
+  
+  # Step 3. Compute the acceptance radio
+  R <- Lik(b_prop)*prior(b_prop) / (Lik(b)*prior(b))
+  
+  # Step 4. Select new value of b via the Markov Chanin
+  if(runif(1) < R){
+    b <- b_prop
+  }
+  b_path <- rbind(b_path,b)
+}
+
+par(mfrow=c(3,2))
+plot(b_path[nrow(b_path) - c(999:0),1],type='l') 
+hist(b_path[nrow(b_path) - c(999:0),1]) 
+
+plot(b_path[nrow(b_path) - c(999:0),2],type='l') 
+hist(b_path[nrow(b_path) - c(999:0),2]) 
+
+plot(b_path[nrow(b_path) - c(999:0),3],type='l') 
+hist(b_path[nrow(b_path) - c(999:0),3]) 
+
+apply(b_path,2,mean)
+blr$coefficients
+
+
+  
+blr <- glm(y ~ x1 + x2, data = df, family = binomial(link = 'logit'))
+blr
+blr %>% summary() %>% .$cov.unscaled %>% diag() %>% mean()
+aux$c
+## STAN
+
+# data
+logistic_dat <- list(N = 100,
+                     y = df$y, x1 = df$x1, x2 = df$x2,
+                     b0_init = blr$coefficients[1],
+                     b1_init = blr$coefficients[2],
+                     b2_init = blr$coefficients[3],
+                     sig = 20)
+
+# run model
+MCMC_log_reg <- stan(file = 'bayes_log_reg.stan', data = logistic_dat)
+log_reg_stats <- print(MCMC_log_reg)
+
+
+
+plot(MCMC_log_reg,pars = c('b0','b1','b2'))
+stan_hist(MCMC_log_reg, pars = c('b0','b1','b2'))
+stan_trace(MCMC_log_reg, pars = 'b0')
+stan_plot(MCMC_log_reg)
+
+plot(density(traces$data$value[traces$data$parameter == 'b0']))
+
+
+
+par(mfrow = c(1,3))
+
+dens <- density(traces$data$value[traces$data$parameter == 'b0'])
+plot(dens$x,dens$y,col='white', xlab = 'Constant',ylab = 'Density')
+polygon(c(dens$x,rev(dens$x)),c(rep(0,length(dens$x)),rev(dens$y)),
+        col = rgb(1,0,0,0.3))
+
+dens <- density(traces$data$value[traces$data$parameter == 'b1'])
+plot(dens$x,dens$y,col='white', xlab = 'x1',ylab = 'Density',
+     main = 'Bayesian Logistic Regression')
+polygon(c(dens$x,rev(dens$x)),c(rep(0,length(dens$x)),rev(dens$y)),
+        col = rgb(0,1,0,0.3))
+
+dens <- density(traces$data$value[traces$data$parameter == 'b2'])
+plot(dens$x,dens$y,col='white', xlab = 'x2',ylab = 'Density')
+polygon(c(dens$x,rev(dens$x)),c(rep(0,length(dens$x)),rev(dens$y)),
+        col = rgb(0,0,1,0.3))
+
+
+
+?polygon
+
+stan_dens(MCMC_log_reg,pars = c('b0')) +
+  ggtitle('Constant') +
+  xlab('Constant') +
+  ylab('Density')
+
+
+stan_scat(MCMC_log_reg,pars = c('b2','b0'))
+stan_ac(MCMC_log_reg,pars = c('b0','b1','b2'))
+
+aux2 <- stan_trace(MCMC_log_reg, pars = c('b0','b1','b2'))
+hist(aux2$data$value[aux2$data$parameter == 'b0'])
+mean(aux2$data$value[aux2$data$parameter == 'b0'])
+print(MCMC_log_reg)
+
+str(aux2$data)
+
+print(MCMC_log_reg)
+
+grid <- expand.grid(list(x1 = seq(0,1,length = 100), x2 = seq(0,1,length = 100)))
+
+blr$coefficients
+aux2 <- summary(MCMC_log_reg)
+str(aux2$summary)
+dimnames(aux2$summary)
+
+traces <- stan_trace(MCMC_log_reg, pars = c('b0','b1','b2'))
+bayes_coeff <- c(mean(traces$data$value[traces$data$parameter == 'b0']),
+                 mean(traces$data$value[traces$data$parameter == 'b1']),
+                 mean(traces$data$value[traces$data$parameter == 'b2']))
+data.frame( our_coefficients = beta_hat$beta,
+            R_function = log_reg$coefficients,
+            Bayesian_regression = bayes_coeff)
+
+
+grid$surface <-  1/(1+exp(-bayes_coeff[1] - bayes_coeff[2] * grid$x1 - bayes_coeff[3] * grid$x2))
+
+
+par(mfrow=c(1,1))
+image(seq(0,1,length = 100),seq(0,1,length = 100),matrix(grid$surface,ncol = 100),
+      col = rev(heat.colors(15)),
+      xlab = 'x1',ylab = 'x2', main = 'Bayesian Logistic regression', asp = 1,
+      xlim = c(0,1), ylim = c(0,1))
+
+
+points(df$x1,df$x2,col = unlist(lapply(df$y,function(x){ return(if_else(x==1,'black','blue'))})),
+       pch = 15)
+
+legend(1.05, 0.6, c('y = 0', 'y = 1'),col = c('blue','black'),pch = 15, xpd = TRUE, bty = 'n')
+
+contour(x = seq(0,1,length = 100),
+        y = seq(0,1,length = 100),
+        z = matrix(grid$surface,ncol = 100),
+        levels = c(0.1,0.5,0.9), 
+        add = TRUE)
